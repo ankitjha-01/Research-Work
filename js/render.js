@@ -521,7 +521,38 @@ function renderDemo() {
   let extra = '';
   if (step.phase === 'a2iter' && step.cand) {
     const c = step.cand;
-    extra = `<div class="cand">` +
+    // Per-combination breakdown (only when total is small enough to be informative)
+    let comboRows = '';
+    if (c.combos && c.combos.length > 0) {
+      const bestLat = c.best ? c.best.lat : Infinity;
+      comboRows = `<div class="combo-breakdown">` +
+        `<div class="combo-label">All candidate combinations evaluated:</div>` +
+        `<table class="combo-tbl">` +
+        `<thead><tr><th>#</th><th>Scheme (placement + structure)</th><th>Cost</th><th>Status</th></tr></thead>` +
+        `<tbody>` +
+        c.combos.map((row, i) => {
+          const isWinner = c.best && Math.abs(row.lat - bestLat) < 1e-9 && row.feasible;
+          const cls = isWinner ? 'combo-winner' : row.feasible ? 'combo-feas' : 'combo-infeas';
+          const status = isWinner
+            ? '✓ chosen'
+            : row.feasible
+              ? '✓ feasible'
+              : row.lat === Infinity ? '✗ inf' : `✗ ${fmt(row.lat)} > T<sub>max</sub>`;
+          return `<tr class="${cls}">` +
+            `<td>${i + 1}</td>` +
+            `<td class="combo-scheme">${row.label}</td>` +
+            `<td class="combo-cost">${row.lat === Infinity ? '∞' : fmt(row.lat) + ' ms'}</td>` +
+            `<td class="combo-status">${status}</td>` +
+            `</tr>`;
+        }).join('') +
+        `</tbody></table>` +
+        (c.best
+          ? `<div class="combo-chosen">→ Schema chosen: <b>${schemeStr(M, c.best.hosts, c.best.stages)}</b> at <b>${fmt(c.best.lat)} ms</b></div>`
+          : `<div class="combo-chosen combo-none">→ No feasible scheme found for this anchor.</div>`) +
+        `</div>`;
+    }
+    extra = comboRows +
+      `<div class="cand">` +
       `<div class="c"><span>Schemes built</span><b>${c.evaluated.toLocaleString()}</b></div>` +
       `<div class="c"><span>Feasible</span><b>${c.feasible.toLocaleString()}</b></div>` +
       `<div class="c"><span>Best of this anchor</span><b>${c.best ? fmt(c.best.lat) + ' ms' : 'none'}</b></div>` +

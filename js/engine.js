@@ -13,9 +13,10 @@
    ============================================================= */
 
 // ─── Constants ────────────────────────────────────────────────
-const EPS      = 1e-9;
-const K_MAX    = 2048;    // demo safety cap on k
-const CAND_CAP = 30000;   // demo safety cap on candidate schemes per anchor
+const EPS               = 1e-9;
+const K_MAX             = 2048;    // demo safety cap on k
+const CAND_CAP          = 30000;   // demo safety cap on candidate schemes per anchor
+const COMBO_DISPLAY_CAP = 40;      // max per-combination rows stored for the UI
 
 /** Format a number: integers are printed without decimals, others to 1 d.p. */
 const fmt = (x) =>
@@ -382,7 +383,9 @@ function evaluateAnchor(M, A, anchor) {
   const hostCombos   = free.reduce((a, f) => a * hostC[f].length, 1);
   const structCombos = layerOpts.reduce((a, o) => a * o.length, 1);
   const total        = hostCombos * structCombos;
-  const out          = { total, hostCombos, structCombos, evaluated: 0, feasible: 0, best: null, capped: false, freeVNFs: free, fixedVNFs: [...fixed.keys()] };
+  // combos: per-combination rows for the UI (only populated when total is small enough)
+  const trackCombos  = total <= COMBO_DISPLAY_CAP;
+  const out          = { total, hostCombos, structCombos, evaluated: 0, feasible: 0, best: null, capped: false, freeVNFs: free, fixedVNFs: [...fixed.keys()], combos: trackCombos ? [] : null };
 
   const hosts    = new Array(M.V.length).fill(-1);
   fixed.forEach((h, f) => { hosts[f] = h; });
@@ -400,10 +403,20 @@ function evaluateAnchor(M, A, anchor) {
       for (let li = 0; li < M.L; li++) for (const s of layerOpts[li][structIdx[li]]) stages.push(s);
       const ev = evalScheme(M, hosts, stages);
       out.evaluated++;
-      if (ev.lat <= M.tmax + EPS && ev.lat < Infinity) {
+      const isFeas = ev.lat <= M.tmax + EPS && ev.lat < Infinity;
+      if (isFeas) {
         out.feasible++;
         if (!out.best || ev.lat < out.best.lat - EPS)
           out.best = { hosts: hosts.slice(), stages, lat: ev.lat, br: ev.br, chain: ev.chain };
+      }
+      // Record this combination for the UI breakdown
+      if (trackCombos) {
+        out.combos.push({
+          label: schemeStr(M, hosts, stages),
+          struct: structStr(M, stages),
+          lat: ev.lat,
+          feasible: isFeas,
+        });
       }
       let li = M.L - 1;
       while (li >= 0 && ++structIdx[li] >= layerOpts[li].length) { structIdx[li] = 0; li--; }
