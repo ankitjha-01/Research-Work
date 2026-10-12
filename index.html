@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>LOA Walkthrough</title>
+  <meta name="description" content="Interactive step-by-step walkthrough of the LOA algorithm: Algorithm 3 widens a window of cheap DPG paths; Algorithm 2 turns them into parallelization + placement schemes.">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,750&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ═══════════════════════ HEADER ═══════════════════════ -->
+  <header class="top">
+    <div>
+      <h1>LOA, step by step</h1>
+      <p>Algorithm 3 widens a window of cheap DPG paths; Algorithm 2 turns them into
+        parallelization + placement schemes and decides when to stop.
+        Assign your own VNFs and MEC nodes, then walk through every decision.</p>
+    </div>
+    <nav class="modes" aria-label="View">
+      <button id="modeSetup" aria-current="true">Setup</button>
+      <button id="modeDemo"  disabled>Walkthrough</button>
+    </nav>
+  </header>
+
+  <!-- ═══════════════════════ SETUP ════════════════════════ -->
+  <section id="setup">
+
+    <!-- Preset Cards -->
+    <div class="presets" id="presets"></div>
+
+    <div class="grid2">
+
+      <!-- Network Editor -->
+      <section class="panel">
+        <h2>MEC network <small>drag nodes, edit delays and capacities</small></h2>
+        <svg id="netEdit" class="canvas edit" viewBox="0 0 600 340"
+             role="img" aria-label="MEC network editor"></svg>
+        <div class="endpoints">
+          <label>Ingress node (s<sub>u</sub>)
+            <select class="num" id="selSrc" data-bind="src"></select>
+          </label>
+          <label>Egress node (d<sub>u</sub>)
+            <select class="num" id="selDst" data-bind="dst"></select>
+          </label>
+        </div>
+        <div class="rows" id="nodeRows"></div>
+        <div class="hint">Capacity = total resource demand of the VNFs that may share a node.</div>
+        <div class="rows" id="linkRows"></div>
+        <div class="addrow" id="linkAdd"></div>
+      </section>
+
+      <!-- Service Chain Editor -->
+      <section class="panel">
+        <h2>Service chain request <small>same level = may run in parallel</small></h2>
+        <div class="rows" id="vnfRows"></div>
+        <div class="addrow">
+          <button class="btn sm" data-act="addVnf">Add VNF</button>
+        </div>
+        <div class="params" id="params"></div>
+        <div class="summary" id="summary"></div>
+        <div style="margin-top:14px">
+          <button class="btn primary big" id="runBtn" data-act="run">Run LOA</button>
+        </div>
+      </section>
+
+    </div><!-- .grid2 -->
+  </section><!-- #setup -->
+
+  <!-- ═══════════════════════ WALKTHROUGH ══════════════════ -->
+  <section id="demo" hidden>
+
+    <!-- Transport deck (sticky) -->
+    <div class="deck" id="deck">
+      <button class="btn"         data-act="restart">Restart</button>
+      <button class="btn"         data-act="back">Back</button>
+      <button class="btn primary" data-act="next">Next</button>
+      <button class="btn"         data-act="play" id="playBtn">Play</button>
+      <button class="btn"         data-act="nextEvent">Next event</button>
+      <span class="sp"></span>
+      <div class="seg2" role="group" aria-label="Detail level">
+        <button data-act="detail" data-v="key" aria-pressed="true">Key moments</button>
+        <button data-act="detail" data-v="all" aria-pressed="false">Every iteration</button>
+      </div>
+      <select id="speed" aria-label="Play speed">
+        <option value="2800">Slow</option>
+        <option value="1700" selected>Normal</option>
+        <option value="800">Fast</option>
+      </select>
+      <span class="count" id="count"></span>
+    </div>
+
+    <!-- Timeline scrubber -->
+    <div class="scrub" id="scrub" aria-label="Timeline"></div>
+
+    <!-- Key stats -->
+    <div class="stats" id="stats"></div>
+
+    <!-- Main two-column layout -->
+    <div class="dgrid">
+
+      <!-- Left column -->
+      <div class="stack">
+
+        <!-- Narrator -->
+        <section class="panel narr" id="narr"></section>
+
+        <!-- Cost ruler -->
+        <section class="panel">
+          <h2>Cost ruler
+            <small>c<sub>d</sub>(p) of the paths in the window, against the best latency found</small>
+          </h2>
+          <div id="ruler"></div>
+          <div class="legend" id="legend"></div>
+        </section>
+
+        <!-- DPG / network / scheme visualisation -->
+        <section class="panel">
+          <div class="tabs" id="tabs"></div>
+          <div class="vis"  id="vis"></div>
+        </section>
+
+      </div><!-- left column -->
+
+      <!-- Right column -->
+      <div class="stack">
+
+        <!-- Path table -->
+        <section class="panel">
+          <h2 id="tblTitle">Paths</h2>
+          <div class="tbl-wrap" id="tbl"></div>
+        </section>
+
+        <!-- LM-PDS card -->
+        <section class="panel lm" id="lm"></section>
+
+      </div><!-- right column -->
+    </div><!-- .dgrid -->
+
+    <!-- Pseudocode panels -->
+    <div class="pseudo">
+      <section class="panel pcode a3">
+        <h2>Algorithm 3 <small>LOA</small></h2>
+        <div id="pA3"></div>
+      </section>
+      <section class="panel pcode a2">
+        <h2>Algorithm 2 <small>existence check and update of LM-PDS</small></h2>
+        <div id="pA2"></div>
+        <p class="pnote">† Two readings that keep the algorithm terminating.
+          Line 20 prints "flag ← false" in the paper, but the text says the search stops there,
+          so we set it to true. Line 8 is read as A<sup>(t)</sup> ⊆ P so the last path of a
+          window is also tried as anchor.</p>
+      </section>
+    </div><!-- .pseudo -->
+
+  </section><!-- #demo -->
+
+  <!-- ═══════════════════════ NOTES ════════════════════════ -->
+  <details class="notes">
+    <summary>How this demo models the paper</summary>
+    <ul>
+      <li><b>DPG edges.</b>
+        An edge between two replicas costs the shortest link-delay between their MEC nodes
+        (bandwidth is ignored). A DPG path enters every dependency layer, and may visit several
+        VNFs of one layer one after another. Path cost c<sub>d</sub>(p) = link delay + processing
+        delay; replication and integration delay are added only when a full scheme is evaluated.</li>
+      <li><b>Feasible path.</b>
+        The demands of the VNFs it puts on one node fit that node's capacity, and its cost does not
+        exceed T<sub>max</sub>.</li>
+      <li><b>Stability filter.</b>
+        Paths are scanned from cheapest to costliest; a path is dropped if it orders two same-layer
+        VNFs opposite to an already kept, cheaper path.</li>
+      <li><b>S<sub>parallel</sub> (Algorithm 2, lines 10–12).</b>
+        The anchor fixes the hosts and the internal order of the VNFs it visits. Every other VNF
+        may go to any host it has on a path in A<sup>(t)</sup>. Inside each layer every serial /
+        parallel arrangement (ordered set partition) that respects the anchor's order is tried;
+        layers execute one after another. Latency = longest chain of link + processing delay,
+        plus (branches − 1) · τ<sub>rep</sub> at every fork and (branches − 1) · τ<sub>int</sub>
+        at every merge.</li>
+      <li><b>Optimality.</b>
+        When the stability filter never removes a path, this search returns the exact optimum of
+        the model (use the brute-force check on the last step). When it removes paths, Lemma 4.4's
+        guarantee no longer applies and the demo says so.</li>
+      <li><b>Warm start.</b>
+        After k doubles, iterations that repeat the previous round are skipped on screen; the
+        result is identical.</li>
+    </ul>
+  </details>
+
+</div><!-- .wrap -->
+
+<!-- ═══════════════════════ SCRIPTS ══════════════════════════ -->
+<!--
+  Load order matters — each file depends on the globals from the file above it:
+    presets.js  → PRESETS
+    engine.js   → pure algorithm (no DOM)
+    render.js   → SVG/HTML renderers  (reads RUN, S, cfg)
+    ui.js       → setup forms + event delegation (reads/writes cfg, presetIdx, stale)
+    main.js     → global state + DOMContentLoaded bootstrap
+-->
+<script src="data/presets.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
