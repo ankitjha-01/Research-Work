@@ -391,12 +391,73 @@ select.num { font-family: inherit; }
   margin: 2px 0 6px;
 }
 
+/* ── Execution-mode row ───────────────────────────────────────── */
+.mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: var(--panel2);
+  border: 1px solid var(--rule2);
+}
+
+.mode-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mode-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .err { color: var(--omega); font-weight: 600; }
 .warn { color: var(--conf); }
 .hint { font-size: 13px; color: var(--ink3); margin-top: 6px; }
 
+.badge-mode {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  background: hsl(220 70% 55% / .18);
+  color: hsl(220 80% 70%);
+  border: 1px solid hsl(220 70% 55% / .35);
+}
+.badge-mode-all {
+  background: hsl(30 80% 50% / .18);
+  color: hsl(30 90% 65%);
+  border-color: hsl(30 80% 50% / .35);
+}
+
 /* ---------- Network SVG ---------- */
 .lk { stroke: var(--ink3); stroke-width: 2; opacity: .55; }
+.canvas.edit .lk[data-link-i],
+.canvas.edit .lkl[data-link-i] {
+  cursor: pointer;
+  transition: stroke-width .12s, stroke .12s, fill .12s, opacity .12s;
+}
+.canvas.edit .lk.hl-link {
+  stroke: var(--brand);
+  stroke-width: 3.5;
+  opacity: 1;
+}
+.canvas.edit .lkl.hl-link {
+  fill: var(--brand);
+  font-weight: 700;
+}
+.r.rl.hl-link {
+  background: var(--panel2);
+  border-radius: 6px;
+}
 
 .lkl {
   font: 600 11px "IBM Plex Mono", monospace;

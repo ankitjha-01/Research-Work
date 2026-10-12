@@ -7,10 +7,44 @@
    - label  : short display name
    - blurb  : one-line description shown in the card
    - cfg    : full configuration object passed to runLOA()
+   - mode   : (optional) 'paper-strict' | 'all-combos'
 */
 const PRESETS = [
   {
-    label: 'Preset D — parallel wins',
+    label: 'Preset A — partial parallel wins',
+    blurb: '5 VNFs (L1={f1}, L2={f2,f3,f4}, L3={f5}): 4-node topology (a,b,c,d) finds f1→(f2∥(f3→f4))→f5 in 78 steps.',
+    mode: 'paper-strict',
+    cfg: {
+      nodes: [
+        { name: 'a', cap: 25, x: 80,  y: 170 },
+        { name: 'b', cap: 25, x: 280, y: 80  },
+        { name: 'c', cap: 25, x: 280, y: 260 },
+        { name: 'd', cap: 25, x: 480, y: 170 },
+      ],
+      links: [
+        { a: 0, b: 1, delay: 5 },  // a-b
+        { a: 0, b: 2, delay: 10 }, // a-c
+        { a: 1, b: 2, delay: 5 },  // b-c
+        { a: 1, b: 3, delay: 5 },  // b-d
+        { a: 2, b: 3, delay: 10 }, // c-d
+      ],
+      src: 0,
+      dst: 3,
+      vnfs: [
+        { name: 'f1', level: 1, proc: 4, dem: 10 },
+        { name: 'f2', level: 2, proc: 6, dem: 10 },
+        { name: 'f3', level: 2, proc: 6, dem: 10 },
+        { name: 'f4', level: 2, proc: 2, dem: 10 },
+        { name: 'f5', level: 3, proc: 4, dem: 10 },
+      ],
+      trep: 2,
+      tint: 1,
+      tmax: 100,
+      kmax: 512,
+    },
+  },
+  {
+    label: 'Preset B — parallel wins',
     blurb: '4 VNFs, light replication/integration overhead: LOA parallelizes f2 and f3.',
     cfg: {
       nodes: [
@@ -46,7 +80,7 @@ const PRESETS = [
     },
   },
   {
-    label: 'Preset E — serial wins',
+    label: 'Preset C — serial wins',
     blurb: 'Same network, heavy replication/integration overhead: LOA runs everything serially instead.',
     cfg: {
       nodes: [

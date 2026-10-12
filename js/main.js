@@ -130,8 +130,13 @@ function runBrute() {
 
 // ─── Bootstrap ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialise execution mode from the first preset
+  const initMode = (PRESETS[0].mode) || 'all-combos';
+  setExecMode(initMode);
+
   renderPresets();
   renderForms();
+  syncModeUI(initMode);  // sync buttons after DOM is ready
 
   // Mode toggle buttons (not handled by data-act delegation)
   document.getElementById('modeSetup').addEventListener('click', () => {

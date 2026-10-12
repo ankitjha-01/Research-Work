@@ -18,6 +18,19 @@ const K_MAX             = 2048;    // demo safety cap on k
 const CAND_CAP          = 30000;   // demo safety cap on candidate schemes per anchor
 const COMBO_DISPLAY_CAP = 40;      // max per-combination rows stored for the UI
 
+/**
+ * Execution mode:
+ *  'paper-strict'  → Paper 1 (TON 2026): partial groups keep anchor fixed,
+ *                    remaining VNFs inserted only in parallel (3 combos for a
+ *                    3-VNF layer where 1 is anchored).
+ *  'all-combos'    → Paper 2 (TWC 2023) / current code: all Fubini ordered
+ *                    partitions evaluated regardless of anchor coverage (13 combos).
+ */
+let EXEC_MODE = 'paper-strict';
+
+/** Set the active execution mode. Call before runLOA(). */
+function setExecMode(mode) { EXEC_MODE = mode; }
+
 /** Format a number: integers are printed without decimals, others to 1 d.p. */
 const fmt = (x) =>
   x === Infinity
@@ -83,6 +96,7 @@ function buildModel(cfg) {
   };
   M.structs    = layers.map((l) => orderedPartitions(l));
   M.totalPaths = countPaths(M);
+  M.mode       = EXEC_MODE;   // snapshot mode at build time
   return M;
 }
 
@@ -364,6 +378,91 @@ function structOK(st, order) {
 }
 
 /**
+ * Generate candidate structures for a single layer based on the current mode.
+ *
+ * @param {number[]} layer     - all VNF indices in this layer
+ * @param {number[]} anchorVNFs - VNF indices from this layer that are on the anchor path
+ * @param {number[][]} allStructs - all ordered partitions for this layer (M.structs[li])
+ * @param {string}  mode        - 'paper-strict' | 'all-combos'
+ * @returns {number[][][]} array of valid stage arrays
+ */
+function getPartialLayerStructures(layer, anchorVNFs, allStructs, mode) {
+  const nAnchor = anchorVNFs.length;
+  const nLayer  = layer.length;
+
+  // Case 1: Completely absent — generate all ordered partitions
+  if (nAnchor === 0) return allStructs;
+
+  // Case 2: Fully covered — retain exactly the anchor's serial/parallel execution
+  // (The anchor path already specifies which VNF is in which stage; we keep that.)
+  if (nAnchor === nLayer) {
+    // Filter to only structures where anchor VNFs appear in their required order
+    return allStructs.filter((st) => structOK(st, anchorVNFs));
+  }
+
+  // Case 3: Partially covered — key distinction between modes
+  if (mode === 'paper-strict') {
+    // Paper 1 (TON 2026) strict intent:
+    // The anchor VNF(s) stay in a fixed stage; non-anchor VNFs are inserted
+    // IN PARALLEL to the anchor's stage ("without modifying the anchor structure").
+    //
+    // Concretely, if anchorVNFs = [f2] and remaining = [f3, f4], the valid
+    // structures are exactly those where f2 is in a single stage together with
+    // some sub-arrangement of {f3, f4}, and that whole stage is unordered w.r.t.
+    // the anchor — i.e. f3/f4 must be in the SAME stage index as f2 or form
+    // their own sub-chain that is entirely concurrent with f2 (i.e. same stage).
+    //
+    // Practically this means: generate all ordered partitions of the NON-anchor
+    // VNFs, then merge each with the anchor's single-stage: the anchor stage
+    // contains all of [anchorVNFs, ...oneSubsetOfRemaining] that must execute
+    // in parallel in one slot.
+    //
+    // The 3 valid structures for anchor=[f2], remaining=[f3,f4]:
+    //   1. [[f2, f3, f4]]              (full parallel)
+    //   2. [[f2, f3], [f4]]   — NO — this would serial-chain f4 AFTER f2, violating anchor!
+    //   Actually the correct 3 per the paper are:
+    //   1. [[f2, f3, f4]]              full parallel
+    //   2. [[f2, f3→f4]] = [[f2],[f3],[f4]] where f2 is parallel to the sub-chain f3→f4
+    //      but since a stage is a parallel group, this means one stage = [f2] run concurrently
+    //      with sub-chain [f3]->[f4]. Represented as: [[f2, f3], ...] can’t capture that.
+    //      In stage representation: stage0=[f2,f3], stage1=[] is wrong.
+    //      The stage array [[f2]] then [[f3,f4]] would place f3,f4 AFTER f2 — modifies anchor.
+    //      The correct representation of "f2 parallel to (f3→f4)" is:
+    //        stage0 = [f2, f3]  (f2 and f3 start together)
+    //        stage1 = [f4]      (f4 starts after f3 finishes, but f2 may still be running)
+    //      Wait — this is actually the correct parallel sub-chain encoding! f2 starts at
+    //      stage 0, f3 starts at stage 0, f4 starts at stage 1. f2 is never delayed by f3/f4.
+    //
+    // So the 3 structures for anchor=[f2], remaining=[f3,f4] are:
+    //   1. [[f2,f3,f4]]        — full parallel (all same stage)
+    //   2. [[f2,f3],[f4]]      — f2∥f3 in stage 0, f4 in stage 1 (f2∥(f3→f4))
+    //   3. [[f2,f4],[f3]]      — f2∥f4 in stage 0, f3 in stage 1 (f2∥(f4→f3))
+    //
+    // General rule: in all valid structures the anchor VNFs occupy stage 0 (or the
+    // earliest stage), and any non-anchor subset can appear alongside the anchor in
+    // stage 0. The remainder of non-anchor VNFs get their own subsequent sub-stages.
+    // The anchor VNFs themselves NEVER appear in a stage with index > any non-anchor VNF.
+    //
+    // Implementation: enumerate all ordered partitions of remaining VNFs, then
+    // prepend anchors into the first partition block.
+    const remaining = layer.filter((f) => !anchorVNFs.includes(f));
+    const remPartitions = orderedPartitions(remaining);
+    const result = [];
+    for (const rp of remPartitions) {
+      // Merge anchor VNFs into the first stage of each remaining partition
+      // This ensures anchor VNFs always appear at stage index 0 alongside
+      // the first group of remaining VNFs (preserving anchor structure).
+      const merged = [[...anchorVNFs, ...rp[0]], ...rp.slice(1)];
+      result.push(merged);
+    }
+    return result;
+  }
+
+  // 'all-combos' mode: use all Fubini ordered partitions, filter only by anchor order
+  return allStructs.filter((st) => structOK(st, anchorVNFs));
+}
+
+/**
  * Build S_parallel for an anchor (Algorithm 2, lines 10–12) and
  * evaluate every candidate scheme.
  */
@@ -375,8 +474,8 @@ function evaluateAnchor(M, A, anchor) {
       if (!fixed.has(s.f) && !hostC[s.f].includes(s.h)) hostC[s.f].push(s.h);
 
   const layerOpts = M.layers.map((layer, li) => {
-    const order = anchor.seq.filter((s) => M.V[s.f].layer === li).map((s) => s.f);
-    return M.structs[li].filter((st) => structOK(st, order));
+    const anchorVNFs = anchor.seq.filter((s) => M.V[s.f].layer === li).map((s) => s.f);
+    return getPartialLayerStructures(layer, anchorVNFs, M.structs[li], M.mode);
   });
 
   const free         = M.V.filter((v) => !fixed.has(v.idx)).map((v) => v.idx);
@@ -700,6 +799,9 @@ function runLOA(cfg) {
         const isLastOfSet = sizeA === P.length;
         const nextP       = !isLastOfSet ? P[sizeA] : null;
         const imp         = (t === 0 || improved || isLastOfSet || (nextP && nextP.cost > best + EPS)) ? 0 : 1;
+        const modeLabel = M.mode === 'paper-strict'
+          ? '<span class="badge-mode">Paper Strict</span> (TON 2026: partial layers \u2192 3 combos)'
+          : '<span class="badge-mode badge-mode-all">Full Exploration</span> (TWC 2023: all Fubini partitions)';
         push({
           ...base(), best, LM, phase: 'a2iter', alg: 'A2', imp,
           event: improved ? 'update' : null, rawN,
@@ -709,8 +811,8 @@ function runLOA(cfg) {
           hl: { A3: [24], A2: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17] },
           title: `t = ${t}: anchor #${anchor.id}, ${improved ? 'new LM-PDS ' + fmt(best) + ' ms' : 'no improvement'}`,
           body: `A<sup>(${t})</sup> holds the ${sizeA} cheapest paths. The costliest of them, <b>#${anchor.id}</b> (${fmt(anchor.cost)} ms), is the <b>anchor</b>: it decides how slow the branch bottleneck is.<br>` +
-            `<b>Build S<sub>parallel</sub></b> — keep the anchor's hosts and execution order for ${ev.fixedVNFs.map((f) => vn(M, f)).join(', ')}` +
-            (ev.freeVNFs.length ? `; place ${ev.freeVNFs.map((f) => vn(M, f)).join(', ')} on hosts seen in A<sup>(${t})</sup> and try every serial / parallel arrangement inside each layer.` : '; nothing else to place.') +
+            `<b>Build S<sub>parallel</sub></b> [mode: ${modeLabel}] — keep the anchor's hosts and execution order for ${ev.fixedVNFs.map((f) => vn(M, f)).join(', ')}` +
+            (ev.freeVNFs.length ? `; place ${ev.freeVNFs.map((f) => vn(M, f)).join(', ')} on hosts seen in A<sup>(${t})</sup> and try valid serial / parallel arrangements inside each layer.` : '; nothing else to place.') +
             `<br><b>${ev.evaluated.toLocaleString()}</b> candidate scheme${ev.evaluated === 1 ? '' : 's'} evaluated (with replication + integration delay), <b>${ev.feasible.toLocaleString()}</b> feasible` +
             (ev.best ? `; best <b>${fmt(ev.best.lat)} ms</b>.` : '; none feasible.') +
             (ev.capped ? ' <span class="warnline">(demo cap reached)</span>' : '') +

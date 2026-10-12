@@ -82,14 +82,14 @@ function pseudo(lines, hl) {
 function netSVG(c, o = {}) {
   const { under = '', over = '', use = null } = o;
 
-  const links = c.links.map((l) => {
+  const links = c.links.map((l, i) => {
     const a = c.nodes[l.a], b = c.nodes[l.b];
-    return `<line class="lk" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
+    return `<line class="lk" data-link-i="${i}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"/>`;
   }).join('');
 
-  const labels = c.links.map((l) => {
+  const labels = c.links.map((l, i) => {
     const a = c.nodes[l.a], b = c.nodes[l.b];
-    return `<text class="lkl" x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 + 4}">${l.delay}</text>`;
+    return `<text class="lkl" data-link-i="${i}" x="${(a.x + b.x) / 2}" y="${(a.y + b.y) / 2 + 4}">${l.delay}</text>`;
   }).join('');
 
   const nodes = c.nodes.map((n, i) => {

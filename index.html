@@ -65,6 +65,14 @@
           <button class="btn sm" data-act="addVnf">Add VNF</button>
         </div>
         <div class="params" id="params"></div>
+        <div class="mode-row" id="modeRow">
+          <span class="mode-label">S<sub>parallel</sub> mode</span>
+          <div class="seg2" role="group" aria-label="Execution mode">
+            <button id="modePaperStrict" data-act="mode" data-v="paper-strict" aria-pressed="true">Paper Strict (3 combos)</button>
+            <button id="modeAllCombos"   data-act="mode" data-v="all-combos"   aria-pressed="false">Full Exploration (13 combos)</button>
+          </div>
+          <small class="mode-hint" id="modeHint">Paper 1 (TON 2026): partial groups lock anchor; non-anchor VNFs inserted in parallel only.</small>
+        </div>
         <div class="summary" id="summary"></div>
         <div style="margin-top:14px">
           <button class="btn primary big" id="runBtn" data-act="run">Run LOA</button>
@@ -179,9 +187,17 @@
         VNFs opposite to an already kept, cheaper path.</li>
       <li><b>S<sub>parallel</sub> (Algorithm 2, lines 10–12).</b>
         The anchor fixes the hosts and the internal order of the VNFs it visits. Every other VNF
-        may go to any host it has on a path in A<sup>(t)</sup>. Inside each layer every serial /
-        parallel arrangement (ordered set partition) that respects the anchor's order is tried;
-        layers execute one after another. Latency = longest chain of link + processing delay,
+        may go to any host it has on a path in A<sup>(t)</sup>. Inside each layer the mode toggle
+        determines which structures are tried:
+        <ul>
+          <li><b>Paper Strict (TON 2026)</b>: for <em>partially covered</em> layers the anchor
+            VNFs are locked in their stage; remaining VNFs are inserted in parallel
+            (3 combos for a 3-VNF layer with 1 anchor VNF). Completely absent layers still
+            use all Fubini ordered partitions.</li>
+          <li><b>Full Exploration (TWC 2023)</b>: all 13 Fubini ordered partitions are evaluated
+            for every layer regardless of anchor coverage.</li>
+        </ul>
+        Latency = longest chain of link + processing delay,
         plus (branches − 1) · τ<sub>rep</sub> at every fork and (branches − 1) · τ<sub>int</sub>
         at every merge.</li>
       <li><b>Optimality.</b>

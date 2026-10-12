@@ -10,6 +10,21 @@
 // ─── Utility Helpers ─────────────────────────────────────────
 const LETTERS = 'ABCDEFGH';
 
+/** Sync mode toggle buttons and hint text to the given mode string. */
+function syncModeUI(mode) {
+  const btnStrict = document.getElementById('modePaperStrict');
+  const btnAll    = document.getElementById('modeAllCombos');
+  const hint      = document.getElementById('modeHint');
+  if (!btnStrict) return;  // setup not rendered yet
+  btnStrict.setAttribute('aria-pressed', String(mode === 'paper-strict'));
+  btnAll   .setAttribute('aria-pressed', String(mode === 'all-combos'));
+  if (hint) {
+    hint.textContent = mode === 'paper-strict'
+      ? 'Paper 1 (TON 2026): partial groups lock anchor; non-anchor VNFs inserted in parallel only.'
+      : 'Paper 2 (TWC 2023 / Tian et al.): all 13 Fubini ordered partitions, same as exhaustive search.';
+  }
+}
+
 /** Query selector shorthand. */
 const $  = (s, r = document) => r.querySelector(s);
 
@@ -47,8 +62,12 @@ function validate(c) {
   if (c.links.some((l) => !(l.delay > 0)))        errs.push('Every link delay must be positive.');
   if (c.vnfs.some((v) => v.proc < 0 || v.dem < 0)) errs.push('Processing delay and demand cannot be negative.');
   if (!errs.length) {
-    const M = buildModel(c);
-    if (M.totalPaths === 0) errs.push('The ingress and egress nodes are not connected.');
+    try {
+      const M = buildModel(c);
+      if (M.totalPaths === 0) errs.push('The ingress and egress nodes are not connected.');
+    } catch (e) {
+      errs.push('The ingress and egress nodes are not connected.');
+    }
   }
   return { errs, warns };
 }
@@ -89,7 +108,7 @@ function renderForms() {
   $('#nodeRows').innerHTML =
     `<div class="rowh rn"><span>Node</span><span>Capacity C<sub>v</sub></span><span></span></div>` +
     cfg.nodes.map((n, i) =>
-      `<div class="r rn">` +
+      `<div class="r rn" data-node-i="${i}">` +
       `<span class="nm">${n.name}</span>` +
       `<input class="num" type="number" min="0" step="5" value="${n.cap}" data-bind="nodes.${i}.cap" aria-label="Capacity of ${n.name}">` +
       `<button class="x" data-act="delNode" data-i="${i}" aria-label="Remove node ${n.name}" ${cfg.nodes.length <= 3 ? 'disabled' : ''}>×</button>` +
@@ -101,7 +120,7 @@ function renderForms() {
   $('#linkRows').innerHTML =
     `<div class="rowh rl"><span>Link</span><span>Delay (ms)</span><span></span></div>` +
     cfg.links.map((l, i) =>
-      `<div class="r rl">` +
+      `<div class="r rl" data-link-i="${i}">` +
       `<span class="nm">${cfg.nodes[l.a].name} – ${cfg.nodes[l.b].name}</span>` +
       `<input class="num" type="number" min="1" step="1" value="${l.delay}" data-bind="links.${i}.delay" aria-label="Delay of link ${cfg.nodes[l.a].name}-${cfg.nodes[l.b].name}">` +
       `<button class="x" data-act="delLink" data-i="${i}" aria-label="Remove link">×</button>` +
@@ -140,13 +159,25 @@ function renderForms() {
 /** Update the summary panel and network SVG without rebuilding all forms. */
 function refreshSetup() {
   $('#netEdit').innerHTML = netSVG(cfg, { edit: true });
+
+  // Re-apply highlight to the link currently focused
+  const activeRow = document.activeElement ? document.activeElement.closest('.r.rl[data-link-i]') : null;
+  if (activeRow) {
+    const li = activeRow.dataset.linkI;
+    document.querySelectorAll(`[data-link-i="${li}"]`).forEach((el) => el.classList.add('hl-link'));
+  }
+
   const v = validate(cfg);
   let h = `<div class="muted">Dependency order</div><div class="dep">${depString(cfg)}</div>`;
   if (v.errs.length) {
     h += v.errs.map((e) => `<div class="err">${e}</div>`).join('');
   } else {
-    const M = buildModel(cfg);
-    h += `<div>${M.L} layer${M.L > 1 ? 's' : ''}, ${M.V.length} partitions, ${M.n} MEC replicas in each: <b>${M.totalPaths.toLocaleString()}</b> DPG paths. LOA starts with k = ${M.n + 1}.</div>`;
+    try {
+      const M = buildModel(cfg);
+      h += `<div>${M.L} layer${M.L > 1 ? 's' : ''}, ${M.V.length} partitions, ${M.n} MEC replicas in each: <b>${M.totalPaths.toLocaleString()}</b> DPG paths. LOA starts with k = ${M.n + 1}.</div>`;
+    } catch (e) {
+      h += `<div class="err">Invalid network configuration</div>`;
+    }
   }
   h += v.warns.map((e) => `<div class="warn">${e}</div>`).join('');
   if (stale) h += `<div class="warn">Setup changed since the last run. Run again to refresh the walkthrough.</div>`;
@@ -244,6 +275,10 @@ document.addEventListener('click', (e) => {
     presetIdx = i;
     cfg = clone(PRESETS[i].cfg);
     stale = false;
+    // Apply preset's preferred execution mode
+    const m = PRESETS[i].mode || 'all-combos';
+    setExecMode(m);
+    syncModeUI(m);
     renderPresets();
     renderForms();
     return;
@@ -348,10 +383,20 @@ document.addEventListener('click', (e) => {
 
   // Brute force check
   if (act === 'brute') { runBrute(); return; }
+
+  // Execution mode toggle
+  if (act === 'mode') {
+    const v = el.dataset.v;
+    setExecMode(v);
+    syncModeUI(v);
+    if (RUN) stale = true;
+    refreshSetup();
+    return;
+  }
 });
 
-// ─── Input Change Delegation ──────────────────────────────────
-document.addEventListener('change', (e) => {
+// ─── Input & Change Delegation (Live updates for topology & params) ───
+function handleSetupInput(e) {
   const el = e.target;
   const bind = el.dataset.bind;
 
@@ -368,6 +413,52 @@ document.addEventListener('change', (e) => {
     return;
   }
 
-  // Generic data-bind
-  if (bind) { setBind(bind, numv(el.value)); edited(); }
-});
+  // Generic data-bind (link delays, node capacities, VNFs, etc.)
+  if (bind) {
+    setBind(bind, numv(el.value));
+    edited();
+  }
+}
+
+document.addEventListener('input', handleSetupInput);
+document.addEventListener('change', handleSetupInput);
+
+// ─── Link & Node Interactive Highlighting ─────────────────────
+(function attachSetupHover() {
+  function setHlLink(linkIdx, on) {
+    if (linkIdx == null) return;
+    document.querySelectorAll(`[data-link-i="${linkIdx}"]`).forEach((el) => {
+      el.classList.toggle('hl-link', on);
+    });
+  }
+
+  document.addEventListener('pointerover', (e) => {
+    const lk = e.target.closest('[data-link-i]');
+    if (lk) setHlLink(lk.dataset.linkI, true);
+  });
+
+  document.addEventListener('pointerout', (e) => {
+    const lk = e.target.closest('[data-link-i]');
+    if (lk) setHlLink(lk.dataset.linkI, false);
+  });
+
+  document.addEventListener('focusin', (e) => {
+    const row = e.target.closest('.r.rl[data-link-i]');
+    if (row) setHlLink(row.dataset.linkI, true);
+  });
+
+  document.addEventListener('focusout', (e) => {
+    const row = e.target.closest('.r.rl[data-link-i]');
+    if (row) setHlLink(row.dataset.linkI, false);
+  });
+
+  // Clicking a link label/line in the SVG editor focuses its delay input
+  document.addEventListener('click', (e) => {
+    const svgLk = e.target.closest('#netEdit [data-link-i]');
+    if (svgLk) {
+      const idx = svgLk.dataset.linkI;
+      const inp = document.querySelector(`input[data-bind="links.${idx}.delay"]`);
+      if (inp) { inp.focus(); inp.select(); }
+    }
+  });
+})();
